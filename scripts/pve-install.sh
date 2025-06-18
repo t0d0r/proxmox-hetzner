@@ -26,18 +26,18 @@ get_system_inputs() {
     if [ -z "$DEFAULT_INTERFACE" ]; then
         DEFAULT_INTERFACE=$(udevadm info -e | grep -m1 -A 20 ^P.*eth0 | grep ID_NET_NAME_PATH | cut -d'=' -f2)
     fi
-    
+
     # Get all available interfaces and their altnames
     AVAILABLE_ALTNAMES=$(ip -d link show | grep -v "lo:" | grep -E '(^[0-9]+:|altname)' | awk '/^[0-9]+:/ {interface=$2; gsub(/:/, "", interface); printf "%s", interface} /altname/ {printf ", %s", $2} END {print ""}' | sed 's/, $//')
-    
+
     # Set INTERFACE_NAME to default if not already set
     if [ -z "$INTERFACE_NAME" ]; then
         INTERFACE_NAME="$DEFAULT_INTERFACE"
     fi
-    
+
     # Prompt user for interface name
     read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
-    
+
     # Now get network information based on the selected interface
     MAIN_IPV4_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet " | xargs | cut -d" " -f2)
     MAIN_IPV4=$(echo "$MAIN_IPV4_CIDR" | cut -d'/' -f1)
@@ -45,14 +45,14 @@ get_system_inputs() {
     MAC_ADDRESS=$(ip link show "$INTERFACE_NAME" | awk '/ether/ {print $2}')
     IPV6_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet6 " | xargs | cut -d" " -f2)
     MAIN_IPV6=$(echo "$IPV6_CIDR" | cut -d'/' -f1)
-    
+
     # Set a default value for FIRST_IPV6_CIDR even if IPV6_CIDR is empty
     if [ -n "$IPV6_CIDR" ]; then
         FIRST_IPV6_CIDR="$(echo "$IPV6_CIDR" | cut -d'/' -f1 | cut -d':' -f1-4):1::1/80"
     else
         FIRST_IPV6_CIDR=""
     fi
-    
+
     # Display detected information
     echo -e "${CLR_YELLOW}Detected Network Information:${CLR_RESET}"
     echo "Interface Name: $INTERFACE_NAME"
@@ -62,7 +62,7 @@ get_system_inputs() {
     echo "MAC Address: $MAC_ADDRESS"
     echo "IPv6 CIDR: $IPV6_CIDR"
     echo "IPv6: $MAIN_IPV6"
-    
+
     # Get user input for other configuration
     read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
     read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
@@ -70,7 +70,7 @@ get_system_inputs() {
     read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
     read -e -p "Enter your private subnet : " -i "192.168.26.0/24" PRIVATE_SUBNET
     read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-    
+
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
     # Append .1 to get the first IP in the subnet
@@ -79,7 +79,7 @@ get_system_inputs() {
     SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
     # Create the full CIDR notation for the first IP
     PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
-    
+
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
         # Print message in a new line
@@ -179,8 +179,8 @@ install_proxmox() {
         -enable-kvm $UEFI_OPTS \
         -cpu host -smp 4 -m 4096 \
         -boot d -cdrom ./pve-autoinstall.iso \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio -no-reboot -display none > /dev/null 2>&1
+        -drive file=/dev/nvme2n1,format=raw,media=disk,if=virtio \
+        -drive file=/dev/nvme4n1,format=raw,media=disk,if=virtio -no-reboot -display none > /dev/null 2>&1
 }
 
 # Function to boot the installed Proxmox via QEMU with port forwarding
@@ -200,13 +200,13 @@ boot_proxmox_with_port_forwarding() {
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
         -smp 4 -m 4096 \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio \
+        -drive file=/dev/nvme2n1,format=raw,media=disk,if=virtio \
+        -drive file=/dev/nvme4n1,format=raw,media=disk,if=virtio \
         > qemu_output.log 2>&1 &
-    
+
     QEMU_PID=$!
     echo -e "${CLR_YELLOW}QEMU started with PID: $QEMU_PID${CLR_RESET}"
-    
+
     # Wait for SSH to become available on port 5555
     echo -e "${CLR_YELLOW}Waiting for SSH to become available on port 5555...${CLR_RESET}"
     for i in {1..60}; do
@@ -221,20 +221,20 @@ boot_proxmox_with_port_forwarding() {
             return 1
         fi
     done
-    
+
     return 0
 }
 
 make_template_files() {
     echo -e "${CLR_BLUE}Modifying template files...${CLR_RESET}"
-    
+
     echo -e "${CLR_YELLOW}Downloading template files...${CLR_RESET}"
     mkdir -p ./template_files
 
-    wget -O ./template_files/99-proxmox.conf https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf
-    wget -O ./template_files/hosts https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts
-    wget -O ./template_files/interfaces https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces
-    wget -O ./template_files/sources.list https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/sources.list
+    wget -O ./template_files/99-proxmox.conf https://github.com/t0d0r/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf
+    wget -O ./template_files/hosts https://github.com/t0d0r/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts
+    wget -O ./template_files/interfaces https://github.com/t0d0r/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces
+    wget -O ./template_files/sources.list https://github.com/t0d0r/proxmox-hetzner/raw/refs/heads/main/files/template_files/sources.list
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
@@ -267,7 +267,7 @@ configure_proxmox_via_ssh() {
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/interfaces root@localhost:/etc/network/interfaces
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/99-proxmox.conf root@localhost:/etc/sysctl.d/99-proxmox.conf
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sources.list root@localhost:/etc/apt/sources.list
-    
+
     # comment out the line in the sources.list file
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/pve-enterprise.list"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/ceph.list"
@@ -278,7 +278,7 @@ configure_proxmox_via_ssh() {
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
-    
+
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
@@ -289,7 +289,7 @@ configure_proxmox_via_ssh() {
 reboot_to_main_os() {
     echo -e "${CLR_GREEN}Installation complete!${CLR_RESET}"
     echo -e "${CLR_YELLOW}After rebooting, you will be able to access your Proxmox at https://${MAIN_IPV4_CIDR%/*}:8006${CLR_RESET}"
-    
+
     #ask user to reboot the system
     read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
