@@ -17,6 +17,11 @@ if [[ $EUID != 0 ]]; then
     exit 1
 fi
 
+# === QEMU Disk Variables ===
+QEMU_DISK1="/dev/nvme0n1"
+QEMU_DISK2="/dev/nvme1n1"
+
+
 echo -e "${CLR_GREEN}Starting Proxmox auto-installation...${CLR_RESET}"
 
 # Function to get user input
@@ -66,7 +71,7 @@ get_system_inputs() {
     # Get user input for other configuration
     read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
     read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
-    read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
+    read -e -p "Enter your timezone : " -i "Europe/Sofia" TIMEZONE
     read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
     read -e -p "Enter your private subnet : " -i "192.168.26.0/24" PRIVATE_SUBNET
     read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
@@ -179,8 +184,9 @@ install_proxmox() {
         -enable-kvm $UEFI_OPTS \
         -cpu host -smp 4 -m 4096 \
         -boot d -cdrom ./pve-autoinstall.iso \
-        -drive file=/dev/nvme2n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme5n1,format=raw,media=disk,if=virtio -no-reboot -display none > /dev/null 2>&1
+        -drive file=$QEMU_DISK1,format=raw,media=disk,if=virtio \
+        -drive file=$QEMU_DISK2,format=raw,media=disk,if=virtio \
+        -no-reboot -display none > /dev/null 2>&1
 }
 
 # Function to boot the installed Proxmox via QEMU with port forwarding
@@ -200,8 +206,8 @@ boot_proxmox_with_port_forwarding() {
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
         -smp 4 -m 4096 \
-        -drive file=/dev/nvme2n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme5n1,format=raw,media=disk,if=virtio \
+        -drive file=$QEMU_DISK1,format=raw,media=disk,if=virtio \
+        -drive file=$QEMU_DISK2,format=raw,media=disk,if=virtio \
         > qemu_output.log 2>&1 &
 
     QEMU_PID=$!
@@ -275,6 +281,18 @@ configure_proxmox_via_ssh() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 185.12.64.1\nnameserver 185.12.64.2\nnameserver 1.1.1.1\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
+
+    # Get the MAC address of the default gateway interface
+    DEFAULT_MAC=$(ip link show "$DEFAULT_INTERFACE" | awk '/ether/ {print $2}')
+
+    # Add udev rule to set the MAC address as eth0 on the remote host
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo 'SUBSYSTEM==\"net\", ACTION==\"add\", ATTR{address}==\"$DEFAULT_MAC\", NAME=\"eth0\"' > /etc/udev/rules.d/70-persistent-net.rules"
+
+    # Reload udev rules on the remote host
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "udevadm control --reload-rules && udevadm trigger"
+
+    echo -e "${CLR_GREEN}Udev rule for eth0 with MAC $DEFAULT_MAC added.${CLR_RESET}"
+
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
@@ -301,26 +319,47 @@ reboot_to_main_os() {
     fi
 }
 
+list_nvme_devices() {
+    echo -e "${CLR_BLUE}Listing NVMe devices...${CLR_RESET}"
+    NVME_DEVICES=$(lsblk -o NAME,SIZE,TYPE | awk '$3 == "disk" && $1 ~ /^nvme/ {print $1, $2}' | sort -k2 -h | head -n 2 | awk '{print $1}')
 
+    if [[ -z "$NVME_DEVICES" ]]; then
+        echo -e "${CLR_RED}No NVMe devices found.${CLR_RESET}"
+        exit 1
+    fi
 
-# Main execution flow
-get_system_inputs
-prepare_packages
-download_proxmox_iso
-make_answer_toml
-make_autoinstall_iso
-install_proxmox
+    echo -e "${CLR_GREEN}Selected NVMe devices:${CLR_RESET}"
+    echo "$NVME_DEVICES"
 
-echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
+    # Export the first two NVMe devices as variables
+    QEMU_DISK1="/dev/$(echo $NVME_DEVICES | awk '{print $1}')"
+    QEMU_DISK2="/dev/$(echo $NVME_DEVICES | awk '{print $2}')"
 
-# Boot the installed Proxmox with port forwarding
-boot_proxmox_with_port_forwarding || {
-    echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
-    exit 1
+    echo -e "${CLR_YELLOW}QEMU_DISK1=${QEMU_DISK1}${CLR_RESET}"
+    echo -e "${CLR_YELLOW}QEMU_DISK2=${QEMU_DISK2}${CLR_RESET}"
 }
 
-# Configure Proxmox via SSH
-configure_proxmox_via_ssh
+# Call the function to set the variables
+list_nvme_devices
 
-# Reboot to the main OS
-reboot_to_main_os
+get_system_inputs
+# temporarily disable the next functions because of development
+# prepare_packages
+# download_proxmox_iso
+# make_answer_toml
+# make_autoinstall_iso
+# install_proxmox
+#
+# echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
+#
+# # Boot the installed Proxmox with port forwarding
+# boot_proxmox_with_port_forwarding || {
+#     echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
+#     exit 1
+# }
+#
+# # Configure Proxmox via SSH
+# configure_proxmox_via_ssh
+#
+# # Reboot to the main OS
+# reboot_to_main_os
