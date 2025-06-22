@@ -24,7 +24,7 @@ iface vmbr0 inet static
     address {{MAIN_IPV4_CIDR}}
     gateway {{MAIN_IPV4_GW}}
 #    bridge-ports {{INTERFACE_NAME}}
-    bridge-ports enp193s0f0np0
+    bridge-ports eth0
     bridge-stp off
     bridge-fd 1
     bridge-vlan-aware yes
