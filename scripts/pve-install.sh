@@ -343,23 +343,22 @@ list_nvme_devices() {
 list_nvme_devices
 
 get_system_inputs
-# temporarily disable the next functions because of development
-# prepare_packages
-# download_proxmox_iso
-# make_answer_toml
-# make_autoinstall_iso
-# install_proxmox
-#
-# echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
-#
-# # Boot the installed Proxmox with port forwarding
-# boot_proxmox_with_port_forwarding || {
-#     echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
-#     exit 1
-# }
-#
-# # Configure Proxmox via SSH
-# configure_proxmox_via_ssh
-#
-# # Reboot to the main OS
-# reboot_to_main_os
+prepare_packages
+download_proxmox_iso
+make_answer_toml
+make_autoinstall_iso
+install_proxmox
+
+echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
+
+# Boot the installed Proxmox with port forwarding
+boot_proxmox_with_port_forwarding || {
+    echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
+    exit 1
+}
+
+# Configure Proxmox via SSH
+configure_proxmox_via_ssh
+
+# Reboot to the main OS
+reboot_to_main_os
